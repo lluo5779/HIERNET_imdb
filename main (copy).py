@@ -52,7 +52,7 @@ from keras.datasets import imdb
 
 
 from keras.models import Model
-from keras.layers import Input
+from keras.layers import Input, Activation, Permute, Flatten
 from keras.layers.embeddings import Embedding
 from keras.layers.recurrent import GRU
 from keras.layers.wrappers import Bidirectional, TimeDistributed
@@ -62,7 +62,7 @@ from keras.layers import Lambda, regularizers, Average, Multiply, Add
 
 from keras import callbacks
 
-from keras import backend as k
+from keras import backend as K
 
 max_features = 20000
 maxlen = 80 # cuts texts after this number of words
@@ -90,29 +90,29 @@ print('Loading data...')
 #(X_train, y_train), (X_test, y_test) = imdb.load_data(num_words=max_features)
 
 x_train = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/train_data_features.npy')#np.load('/home/owner/デスクトップ/PythonFile/imdb/x_train_sort.npy')
-y_train = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/train_data_scores_binary.npy')#np.load('/home/owner/デスクトップ/PythonFile/imdb/x_test_sort.npy')
-print(len(x_train))
+#y_train = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/train_data_scores_binary.npy')#np.load('/home/owner/デスクトップ/PythonFile/imdb/x_test_sort.npy')
+#print(len(x_train))
 
 x_test = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/test_data_features.npy')#np.load('/home/owner/デスクトップ/PythonFile/imdb/t_train.npy')
-y_test = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/test_data_scores_binary.npy')#np.load('/home/owner/デスクトップ/PythonFile/imdb/t_test.npy')
+#y_test = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/test_data_scores_binary.npy')#np.load('/home/owner/デスクトップ/PythonFile/imdb/t_test.npy')
 
-x_valid = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/validation_data_features.npy')
-y_valid = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/validation_data_scores_binary.npy')
+#x_valid = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/validation_data_features.npy')
+#y_valid = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/validation_data_scores_binary.npy')
 
 train_idx = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/train_data_idx_binary_only.npy')
 test_idx = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/test_data_idx_binary_only.npy')
-valid_idx = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/validation_data_idx_binary_only.npy')
+#valid_idx = np.load('/home/louis/SharedWindows/edu_data/Preprocessed/validation_data_idx_binary_only.npy')
 
 #print(len(train_idx))
 x_train = x_train[train_idx]
 #y_train = y_train[train_idx]
-print(len(x_train))
-print(len(y_train))
+#print(len(x_train))
+#print(len(y_train))
 
 x_test = x_test[test_idx]
 #y_test = y_test[test_idx]
 
-x_valid = x_valid[valid_idx]
+#x_valid = x_valid[valid_idx]
 #y_valid = y_valid[valid_idx]
 #print(len(x_train))
 
@@ -156,13 +156,13 @@ print(vocabSize, embeddingSize)
 
 x_in = Input( shape = ( numSentencesPerDoc, numWordsPerSentence ) , name='Input' )
 embLayer = Embedding( input_dim=embWeights.shape[0], output_dim=embWeights.shape[1], weights=[embWeights]
-                      ,mask_zero=True , trainable=True, embeddings_regularizer=regularizers.l2(0.0000001)
+                      ,mask_zero=False , trainable=False, embeddings_regularizer=regularizers.l2(0.0000001)
                       , input_length=numWordsPerSentence, name='Embedding' )
 
 sent_vecs = []
 
 extraDimLayer = Lambda(lambda x: K.expand_dims(x), name='extraDimForConvo')
-squeezeSecondLayer = Lambda(lambda x: K.squeeze(x, 1), name='squeezeThirdLayer')
+squeezeSecondLayer = Lambda(lambda x: K.squeeze(x, 1), name='squeezeLayer')
 
 for i in range(numSentencesPerDoc):
     
@@ -179,13 +179,15 @@ for i in range(numSentencesPerDoc):
     
     CONTEXT_DIM = int(biRnn_word.shape[2])
     
-    eij = Dense(CONTEXT_DIM, use_bias=True, activation='tanh')(biRnn_word)
-    eij = Dense(CONTEXT_DIM, use_bias=False, activation='softmax')(eij)
+    eij_ = Dense(CONTEXT_DIM, use_bias=True, activation='tanh')(biRnn_word)
+    eij = Dense(1, use_bias=False)(eij_)
+    eij_normalized = TimeDistributed(Activation('softmax'))(eij)
+    #eij_permuted =Permute((2,1))(eij_normalized)
 
-    weighted_input_ = merge([eij, biRnn_word], mode = 'mul', name='word_attention_'+str(i))
+    sent_vec = Dot(axes=1)([eij_normalized, biRnn_word])#merge([eij_permuted, biRnn_word], mode = 'mul', name='word_attention_'+str(i))
     
-    sent_vec = Lambda(lambda x: k.sum(x, axis = 1))(weighted_input_) 
-    sent_vec = Lambda(lambda x: k.expand_dims(x, axis = 1))(sent_vec)
+    #sent_vec = Lambda(lambda x: k.sum(x, axis = 1))(weighted_input_) 
+    #sent_vec = Lambda(lambda x: k.squeeze(x, axis = 1))(sent_vec)
     sent_vecs.append(sent_vec)
 
 mergedSentVecs= Concatenate(axis = 1)(sent_vecs)
@@ -198,12 +200,14 @@ biRnn_sent = Bidirectional(GRU(SENT_GRU_NUM,  return_sequences=True, bias_regula
 
 CONTEXT_DIM_SENT = int(biRnn_sent.shape[2])
 
-eij_sent = Dense(CONTEXT_DIM_SENT, use_bias=True, activation='tanh')(biRnn_sent)
-eij_sent = Dense(CONTEXT_DIM_SENT, use_bias=False, activation='softmax')(eij_sent)
+eij_sent_ = Dense(CONTEXT_DIM_SENT, use_bias=True, activation='tanh')(biRnn_sent)
+eij_sent = Dense(1, use_bias=False)(eij_sent_)
+eij_sent_normalized = TimeDistributed(Activation('softmax'))(eij_sent)
+#eij_sent_permuted =Permute((2,1))(eij_sent_normalized)
 
-weighted_input_sent = merge([eij_sent, biRnn_sent], mode = 'mul', name='sentence_attention')
-
-doc_vec = Lambda(lambda x: k.sum(x, axis = 1))(weighted_input_sent) 
+doc_vec_ = Dot(axes=1)([eij_sent_normalized, biRnn_sent])
+doc_vec = squeezeSecondLayer(doc_vec_)
+#doc_vec = Lambda(lambda x: k.sum(x, axis = 1))(doc_vec) 
 #doc_vec = Lambda(lambda x: k.expand_dims(x, axis = 1))(doc_vec)
 
 out = Dense(1,activation='sigmoid', use_bias=True)(doc_vec)
